@@ -277,12 +277,6 @@ static void add_instrumentation(void) {
   u8 instr_ok = 0, skip_csect = 0, skip_next_label = 0, skip_intel = 0,
      skip_app = 0, instrument_next = 0;
 
-#ifdef __APPLE__
-
-  u8 *colon_pos;
-
-#endif                                                         /* __APPLE__ */
-
   if (input_file) {
 
     inf = fopen(input_file, "r");
@@ -309,14 +303,15 @@ static void add_instrumentation(void) {
        mode, and if the line starts with a tab followed by a character, dump
        the trampoline now. */
 
+	// printf("%s\n", line);
     if (!pass_thru && !skip_intel && !skip_app && !skip_csect && instr_ok &&
         instrument_next && line[0] == '\t' && isalpha(line[1])) {
 
-      fprintf(outf, use_64bit ? trampoline_fmt_64 : trampoline_fmt_32,
-              R(MAP_SIZE));
-
-      instrument_next = 0;
-      ins_lines++;
+    	fprintf(outf, use_64bit ? trampoline_fmt_64 : trampoline_fmt_32,
+        		R(MAP_SIZE));
+		printf("Instrumented here %s\n", line);
+		instrument_next = 0;
+		ins_lines++;
 
     }
 
@@ -350,7 +345,6 @@ static void add_instrumentation(void) {
 
         instr_ok = 1;
         continue;
-
       }
 
       if (!strncmp(line + 2, "section\t", 8) ||
@@ -359,7 +353,6 @@ static void add_instrumentation(void) {
 
         instr_ok = 0;
         continue;
-
       }
 
     }
@@ -414,105 +407,59 @@ static void add_instrumentation(void) {
 
      */
 
-    if (skip_intel || skip_app || skip_csect || !instr_ok || line[0] == '#' ||
-        line[0] == ' ') {
+    if (skip_intel || skip_app || skip_csect || !instr_ok || line[0] == ' ') {
 
       continue;
-
     }
 
     /* Conditional branch instruction (jnz, etc). We append the instrumentation
        right after the branch (to instrument the not-taken path) and at the
        branch destination label (handled later on). */
 
-    if (line[0] == '\t') {
+    // if (line[0] == '\t') {
 
-      if (line[1] == 'j' && line[2] != 'm' && R(100) < (long)inst_ratio) {
+    //   if (line[1] == 'j' && line[2] != 'm' && R(100) < (long)inst_ratio) {
 
-        fprintf(outf, use_64bit ? trampoline_fmt_64 : trampoline_fmt_32,
-                R(MAP_SIZE));
+    //     fprintf(outf, use_64bit ? trampoline_fmt_64 : trampoline_fmt_32,
+    //             R(MAP_SIZE));
 
-        ins_lines++;
+    //     ins_lines++;
 
-      }
+    //   }
 
-      continue;
+    //   continue;
 
-    }
+    // }
 
     /* Label of some sort. This may be a branch destination, but we need to
        read carefully and account for several different formatting
        conventions. */
 
-#ifdef __APPLE__
-
-    /* Apple: L<whatever><digit>: */
-
-    if ((colon_pos = strstr(line, ":"))) {
-
-      if (line[0] == 'L' && isdigit(*(colon_pos - 1))) {
-
-#else
-
     /* Everybody else: .L<whatever>: */
 
-    if (strstr(line, ":")) {
+    // if (strstr(line, ":")) {
 
-      if (line[0] == '.') {
-
-#endif                                                         /* __APPLE__ */
-
-        /* .L0: or LBB0_0: style jump destination */
-
-#ifdef __APPLE__
-
-        /* Apple: L<num> / LBB<num> */
-
-        if ((isdigit(line[1]) || (clang_mode && !strncmp(line, "LBB", 3))) &&
-            R(100) < (long)inst_ratio) {
-
-#else
-
-        /* Apple: .L<num> / .LBB<num> */
-
-        if ((isdigit(line[2]) ||
-             (clang_mode && !strncmp(line + 1, "LBB", 3))) &&
-            R(100) < (long)inst_ratio) {
-
-#endif                                                         /* __APPLE__ */
-
-          /* An optimization is possible here by adding the code only if the
-             label is mentioned in the code in contexts other than call / jmp.
-             That said, this complicates the code by requiring two-pass
-             processing (messy with stdin), and results in a speed gain
-             typically under 10%, because compilers are generally pretty good
-             about not generating spurious intra-function jumps.
-
-             We use deferred output chiefly to avoid disrupting
-             .Lfunc_begin0-style exception handling calculations (a problem on
-             MacOS X). */
-
-          if (!skip_next_label) {
-
-            instrument_next = 1;
-
-          } else {
-
-            skip_next_label = 0;
-
-          }
-
-        }
-
-      } else {
-
-        /* Function label (always instrumented, deferred mode). */
-
-        instrument_next = 1;
-
-      }
-
-    }
+    // 	if (line[0] == '.') {
+	// 		/* .L0: or LBB0_0: style jump destination */
+	// 		if ((isdigit(line[2]) ||
+	// 			(clang_mode && !strncmp(line + 1, "LBB", 3))) &&
+	// 			R(100) < (long)inst_ratio) {
+	// 			if (!skip_next_label) {
+	// 				instrument_next = 1;
+	// 			} else {
+	// 				skip_next_label = 0;
+	// 			}
+	// 		}
+    //   	} else {
+    // 		/* Function label (always instrumented, deferred mode). */
+	// 		/* In our case, we instrument all the labels genereted by ellf meta lift*/
+	// 		instrument_next = 1;
+    // 	}
+    // }
+	if (strstr(line, "#LBS_INSTR")) {
+		printf("Found instrumentation marker %s\n", line);
+		instrument_next = 1;
+	}
 
   }
 
@@ -668,4 +615,3 @@ int main(int argc, char **argv) {
   exit(WEXITSTATUS(status));
 
 }
-
