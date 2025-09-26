@@ -40,7 +40,7 @@
 #include "debug.h"
 #include "alloc-inl.h"
 
-#include "afl-as.h"
+#include "afl-as-intel.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -218,7 +218,7 @@ static void add_instrumentation(void) {
     if (!pass_thru && !skip_att && !skip_app && !skip_csect && instr_ok &&
         instrument_next && line[0] == '\t' && isalpha(line[1])) {
 
-      fprintf(outf, trampoline_fmt_64, R(MAP_SIZE));
+      fprintf(outf, trampoline_fmt_64_intel, R(MAP_SIZE));
 
       instrument_next = 0;
       ins_lines++;
@@ -334,7 +334,7 @@ static void add_instrumentation(void) {
 
       if (line[1] == 'j' && line[2] != 'm' && R(100) < (long)inst_ratio) {
 
-        fprintf(outf, trampoline_fmt_64, R(MAP_SIZE));
+        fprintf(outf, trampoline_fmt_64_intel, R(MAP_SIZE));
 
         ins_lines++;
 
@@ -395,7 +395,7 @@ static void add_instrumentation(void) {
 
   }
 
-  if (ins_lines) { fputs(main_payload_64, outf); }
+  if (ins_lines) { fputs(main_payload_64_intel, outf); }
 
   if (input_file) { fclose(inf); }
   fclose(outf);
