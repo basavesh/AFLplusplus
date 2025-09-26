@@ -108,29 +108,6 @@
 
  */
 
-static const u8 *trampoline_fmt_32 =
-
-    "\n"
-    "/* --- AFL TRAMPOLINE (32-BIT) --- */\n"
-    "\n"
-    ".align 4\n"
-    "\n"
-    "leal -16(%%esp), %%esp\n"
-    "movl %%edi,  0(%%esp)\n"
-    "movl %%edx,  4(%%esp)\n"
-    "movl %%ecx,  8(%%esp)\n"
-    "movl %%eax, 12(%%esp)\n"
-    "movl $0x%08x, %%ecx\n"
-    "call __afl_maybe_log\n"
-    "movl 12(%%esp), %%eax\n"
-    "movl  8(%%esp), %%ecx\n"
-    "movl  4(%%esp), %%edx\n"
-    "movl  0(%%esp), %%edi\n"
-    "leal 16(%%esp), %%esp\n"
-    "\n"
-    "/* --- END --- */\n"
-    "\n";
-
 static const u8 *trampoline_fmt_64 =
 
     "\n"
@@ -152,248 +129,6 @@ static const u8 *trampoline_fmt_64 =
     "/* --- END --- */\n"
     "\n";
 
-static const u8 *main_payload_32 = 
-
-  "\n"
-  "/* --- AFL MAIN PAYLOAD (32-BIT) --- */\n"
-  "\n"
-  ".text\n"
-  ".att_syntax\n"
-  ".code32\n"
-  ".align 8\n"
-  "\n"
-
-  "__afl_maybe_log:\n"
-  "\n"
-  "  lahf\n"
-  "  seto %al\n"
-  "\n"
-  "  /* Check if SHM region is already mapped. */\n"
-  "\n"
-  "  movl  __afl_area_ptr, %edx\n"
-  "  testl %edx, %edx\n"
-  "  je    __afl_setup\n"
-  "\n"
-  "__afl_store:\n"
-  "\n"
-  "  /* Calculate and store hit for the code location specified in ecx. There\n"
-  "     is a double-XOR way of doing this without tainting another register,\n"
-  "     and we use it on 64-bit systems; but it's slower for 32-bit ones. */\n"
-  "\n"
-#ifndef COVERAGE_ONLY
-  "  movl __afl_prev_loc, %edi\n"
-  "  xorl %ecx, %edi\n"
-  "  shrl $1, %ecx\n"
-  "  movl %ecx, __afl_prev_loc\n"
-#else
-  "  movl %ecx, %edi\n"
-#endif                                                   /* ^!COVERAGE_ONLY */
-  "\n"
-#ifdef SKIP_COUNTS
-  "  orb  $1, (%edx, %edi, 1)\n"
-#else
-  "  addb $1, (%edx, %edi, 1)\n"
-  "  adcb $0, (%edx, %edi, 1)\n" // never zero counter implementation. slightly better path discovery and little performance impact
-#endif                                                      /* ^SKIP_COUNTS */
-  "\n"
-  "__afl_return:\n"
-  "\n"
-  "  addb $127, %al\n"
-  "  sahf\n"
-  "  ret\n"
-  "\n"
-  ".align 8\n"
-  "\n"
-  "__afl_setup:\n"
-  "\n"
-  "  /* Do not retry setup if we had previous failures. */\n"
-  "\n"
-  "  cmpb $0, __afl_setup_failure\n"
-  "  jne  __afl_return\n"
-  "\n"
-  "  /* Map SHM, jumping to __afl_setup_abort if something goes wrong.\n"
-  "     We do not save FPU/MMX/SSE registers here, but hopefully, nobody\n"
-  "     will notice this early in the game. */\n"
-  "\n"
-  "  pushl %eax\n"
-  "  pushl %ecx\n"
-  "\n"
-  "  pushl $.AFL_SHM_ENV\n"
-  "  call  getenv\n"
-  "  addl  $4, %esp\n"
-  "\n"
-  "  testl %eax, %eax\n"
-  "  je    __afl_setup_abort\n"
-  "\n"
-#ifdef USEMMAP
-  "  pushl $384        /* shm_open mode 0600 */\n"
-  "  pushl $2          /* flags O_RDWR   */\n"
-  "  pushl %eax        /* SHM file path  */\n"
-  "  call  shm_open\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  cmpl $-1, %eax\n"
-  "  je   __afl_setup_abort\n"
-  "\n"
-  "  pushl $0          /* mmap off       */\n"
-  "  pushl %eax        /* shm fd         */\n"
-  "  pushl $1          /* mmap flags     */\n"
-  "  pushl $3          /* mmap prot      */\n"
-  "  pushl $"STRINGIFY(MAP_SIZE)"          /* mmap len       */\n"
-  "  pushl $0          /* mmap addr      */\n"
-  "  call  mmap\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  cmpl $-1, %eax\n"
-  "  je   __afl_setup_abort\n"
-  "\n"
-#else
-  "  pushl %eax\n"
-  "  call  atoi\n"
-  "  addl  $4, %esp\n"
-  "\n"
-  "  pushl $0          /* shmat flags    */\n"
-  "  pushl $0          /* requested addr */\n"
-  "  pushl %eax        /* SHM ID         */\n"
-  "  call  shmat\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  cmpl $-1, %eax\n"
-  "  je   __afl_setup_abort\n"
-  "\n"
-#endif
-  "  movb $1, (%eax)\n"
-  "  /* Store the address of the SHM region. */\n"
-  "\n"
-  "  movl %eax, __afl_area_ptr\n"
-  "  movl %eax, %edx\n"
-  "\n"
-  "  popl %ecx\n"
-  "  popl %eax\n"
-  "\n"
-  "__afl_forkserver:\n"
-  "\n"
-  "  /* Enter the fork server mode to avoid the overhead of execve() calls. */\n"
-  "\n"
-  "  pushl %eax\n"
-  "  pushl %ecx\n"
-  "  pushl %edx\n"
-  "\n"
-  "  /* Phone home and tell the parent that we're OK. (Note that signals with\n"
-  "     no SA_RESTART will mess it up). If this fails, assume that the fd is\n"
-  "     closed because we were execve()d from an instrumented binary, or because\n" 
-  "     the parent doesn't want to use the fork server. */\n"
-  "\n"
-  "  pushl $4          /* length    */\n"
-  "  pushl $__afl_temp /* data      */\n"
-  "  pushl $" STRINGIFY((FORKSRV_FD + 1)) "  /* file desc */\n"
-  "  call  write\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  cmpl  $4, %eax\n"
-  "  jne   __afl_fork_resume\n"
-  "\n"
-  "__afl_fork_wait_loop:\n"
-  "\n"
-  "  /* Wait for parent by reading from the pipe. Abort if read fails. */\n"
-  "\n"
-  "  pushl $4          /* length    */\n"
-  "  pushl $__afl_temp /* data      */\n"
-  "  pushl $" STRINGIFY(FORKSRV_FD) "        /* file desc */\n"
-  "  call  read\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  cmpl  $4, %eax\n"
-  "  jne   __afl_die\n"
-  "\n"
-  "  /* Once woken up, create a clone of our process. This is an excellent use\n"
-  "     case for syscall(__NR_clone, 0, CLONE_PARENT), but glibc boneheadedly\n"
-  "     caches getpid() results and offers no way to update the value, breaking\n"
-  "     abort(), raise(), and a bunch of other things :-( */\n"
-  "\n"
-  "  call fork\n"
-  "\n"
-  "  cmpl $0, %eax\n"
-  "  jl   __afl_die\n"
-  "  je   __afl_fork_resume\n"
-  "\n"
-  "  /* In parent process: write PID to pipe, then wait for child. */\n"
-  "\n"
-  "  movl  %eax, __afl_fork_pid\n"
-  "\n"
-  "  pushl $4              /* length    */\n"
-  "  pushl $__afl_fork_pid /* data      */\n"
-  "  pushl $" STRINGIFY((FORKSRV_FD + 1)) "      /* file desc */\n"
-  "  call  write\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  pushl $0             /* no flags  */\n"
-  "  pushl $__afl_temp    /* status    */\n"
-  "  pushl __afl_fork_pid /* PID       */\n"
-  "  call  waitpid\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  cmpl  $0, %eax\n"
-  "  jle   __afl_die\n"
-  "\n"
-  "  /* Relay wait status to pipe, then loop back. */\n"
-  "\n"
-  "  pushl $4          /* length    */\n"
-  "  pushl $__afl_temp /* data      */\n"
-  "  pushl $" STRINGIFY((FORKSRV_FD + 1)) "  /* file desc */\n"
-  "  call  write\n"
-  "  addl  $12, %esp\n"
-  "\n"
-  "  jmp __afl_fork_wait_loop\n"
-  "\n"
-  "__afl_fork_resume:\n"
-  "\n"
-  "  /* In child process: close fds, resume execution. */\n"
-  "\n"
-  "  pushl $" STRINGIFY(FORKSRV_FD) "\n"
-  "  call  close\n"
-  "\n"
-  "  pushl $" STRINGIFY((FORKSRV_FD + 1)) "\n"
-  "  call  close\n"
-  "\n"
-  "  addl  $8, %esp\n"
-  "\n"
-  "  popl %edx\n"
-  "  popl %ecx\n"
-  "  popl %eax\n"
-  "  jmp  __afl_store\n"
-  "\n"
-  "__afl_die:\n"
-  "\n"
-  "  xorl %eax, %eax\n"
-  "  call _exit\n"
-  "\n"
-  "__afl_setup_abort:\n"
-  "\n"
-  "  /* Record setup failure so that we don't keep calling\n"
-  "     shmget() / shmat() over and over again. */\n"
-  "\n"
-  "  incb __afl_setup_failure\n"
-  "  popl %ecx\n"
-  "  popl %eax\n"
-  "  jmp __afl_return\n"
-  "\n"
-  ".AFL_VARS:\n"
-  "\n"
-  "  .comm   __afl_area_ptr, 4, 32\n"
-  "  .comm   __afl_setup_failure, 1, 32\n"
-#ifndef COVERAGE_ONLY
-  "  .comm   __afl_prev_loc, 4, 32\n"
-#endif                                                    /* !COVERAGE_ONLY */
-  "  .comm   __afl_final_loc, 4, 32\n"
-  "  .comm   __afl_fork_pid, 4, 32\n"
-  "  .comm   __afl_temp, 4, 32\n"
-  "\n"
-  ".AFL_SHM_ENV:\n"
-  "  .asciz \"" SHM_ENV_VAR "\"\n"
-  "\n"
-  "/* --- END --- */\n"
-  "\n";
 
 /* The OpenBSD hack is due to lahf and sahf not being recognized by some
    versions of binutils: https://marc.info/?l=openbsd-cvs&m=141636589924400
@@ -403,13 +138,11 @@ static const u8 *main_payload_32 =
    to work around the crash issue with .lcomm and the fact that they don't
    recognize .string. */
 
-#ifdef __APPLE__
-  #define CALL_L64(str) "call _" str "\n"
-#else
-  #define CALL_L64(str) "call " str "@PLT\n"
-#endif                                                        /* ^__APPLE__ */
 
-static const u8 *main_payload_64 = 
+#define CALL_L64(str) "call " str "@PLT\n"
+
+
+static const u8 *main_payload_64 =
 
   "\n"
   "/* --- AFL MAIN PAYLOAD (64-BIT) --- */\n"
@@ -421,11 +154,7 @@ static const u8 *main_payload_64 =
   "\n"
   "__afl_maybe_log:\n"
   "\n"
-#if defined(__OpenBSD__) || (defined(__FreeBSD__) && (__FreeBSD__ < 9))
-  "  .byte 0x9f /* lahf */\n"
-#else
   "  lahf\n"
-#endif                                                 /* ^__OpenBSD__, etc */
   "  seto  %al\n"
   "\n"
   "  /* Check if SHM region is already mapped. */\n"
@@ -454,11 +183,7 @@ static const u8 *main_payload_64 =
   "__afl_return:\n"
   "\n"
   "  addb $127, %al\n"
-#if defined(__OpenBSD__) || (defined(__FreeBSD__) && (__FreeBSD__ < 9))
-  "  .byte 0x9e /* sahf */\n"
-#else
   "  sahf\n"
-#endif                                                 /* ^__OpenBSD__, etc */
   "  ret\n"
   "\n"
   ".align 8\n"
@@ -472,17 +197,13 @@ static const u8 *main_payload_64 =
   "\n"
   "  /* Check out if we have a global pointer on file. */\n"
   "\n"
-#ifndef __APPLE__
   "  movq  __afl_global_area_ptr@GOTPCREL(%rip), %rdx\n"
   "  movq  (%rdx), %rdx\n"
-#else
-  "  movq  __afl_global_area_ptr(%rip), %rdx\n"
-#endif                                                       /* !^__APPLE__ */
   "  testq %rdx, %rdx\n"
   "  je    __afl_setup_first\n"
   "\n"
   "  movq %rdx, __afl_area_ptr(%rip)\n"
-  "  jmp  __afl_store\n" 
+  "  jmp  __afl_store\n"
   "\n"
   "__afl_setup_first:\n"
   "\n"
@@ -572,12 +293,8 @@ static const u8 *main_payload_64 =
   "  movq %rax, %rdx\n"
   "  movq %rax, __afl_area_ptr(%rip)\n"
   "\n"
-#ifdef __APPLE__
-  "  movq %rax, __afl_global_area_ptr(%rip)\n"
-#else
   "  movq __afl_global_area_ptr@GOTPCREL(%rip), %rdx\n"
   "  movq %rax, (%rdx)\n"
-#endif                                                        /* ^__APPLE__ */
   "  movq %rax, %rdx\n"
   "\n"
   "__afl_forkserver:\n"
@@ -741,18 +458,6 @@ static const u8 *main_payload_64 =
   ".AFL_VARS:\n"
   "\n"
 
-#ifdef __APPLE__
-
-  "  .comm   __afl_area_ptr, 8\n"
-  #ifndef COVERAGE_ONLY
-  "  .comm   __afl_prev_loc, 8\n"
-  #endif                                                  /* !COVERAGE_ONLY */
-  "  .comm   __afl_fork_pid, 4\n"
-  "  .comm   __afl_temp, 4\n"
-  "  .comm   __afl_setup_failure, 1\n"
-
-#else
-
   "  .lcomm   __afl_area_ptr, 8\n"
   #ifndef COVERAGE_ONLY
   "  .lcomm   __afl_prev_loc, 8\n"
@@ -760,8 +465,6 @@ static const u8 *main_payload_64 =
   "  .lcomm   __afl_fork_pid, 4\n"
   "  .lcomm   __afl_temp, 4\n"
   "  .lcomm   __afl_setup_failure, 1\n"
-
-#endif                                                        /* ^__APPLE__ */
 
   "  .comm    __afl_global_area_ptr, 8, 8\n"
   "\n"
@@ -772,4 +475,3 @@ static const u8 *main_payload_64 =
   "\n";
 
 #endif                                                   /* !_HAVE_AFL_AS_H */
-
