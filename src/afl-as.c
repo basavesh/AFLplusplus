@@ -40,7 +40,7 @@
 #include "debug.h"
 #include "alloc-inl.h"
 
-#include "afl-as-intel.h"
+#include "afl-as.h"
 
 #include <stdio.h>
 #include <unistd.h>
