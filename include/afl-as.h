@@ -126,7 +126,6 @@ static const u8 *trampoline_fmt_64_intel =
     "mov rcx, qword ptr [rsp + 8]\n"
     "mov rdx, qword ptr [rsp + 0]\n"
     "lea rsp, [rsp + 152]\n"
-    ".intel_syntax prefix\n"
     "\n"
     "/* --- END --- */\n"
     "\n";
@@ -457,7 +456,6 @@ static const u8 *main_payload_64_intel =
   "\n"
   ".AFL_SHM_ENV:\n"
   "  .asciz \"" SHM_ENV_VAR "\"\n"
-  ".intel_syntax prefix\n"
   "\n"
   "/* --- END --- */\n"
   "\n";
